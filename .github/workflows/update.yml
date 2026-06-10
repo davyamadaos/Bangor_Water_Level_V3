@@ -1,6 +1,4 @@
-Update.yml
-
-name: Update Data
+Update Data
 
 on:
   schedule:
