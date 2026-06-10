@@ -1,0 +1,8 @@
+{
+  "name": "Bangor Water Level",
+  "short_name": "Bangor Level",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f5f5f5",
+  "theme_color": "#2563eb"
+}
