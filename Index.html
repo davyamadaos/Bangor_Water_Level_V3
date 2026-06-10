@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Bangor Water Level V3</title>
+
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#2563eb">
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+
+:root{
+ --bg:#f5f5f5;
+ --card:#ffffff;
+ --text:#111;
+}
+
+@media (prefers-color-scheme: dark){
+ :root{
+  --bg:#121212;
+  --card:#1e1e1e;
+  --text:#f0f0f0;
+ }
+}
+
+body{
+ font-family:-apple-system,BlinkMacSystemFont,sans-serif;
+ background:var(--bg);
+ color:var(--text);
+ max-width:1200px;
+ margin:auto;
+ padding:20px;
+}
+
+.card{
+ background:var(--card);
+ border-radius:12px;
+ padding:20px;
+ margin-bottom:20px;
+ box-shadow:0 2px 8px rgba(0,0,0,.1);
+}
+
+.level{
+ font-size:3.5rem;
+ font-weight:bold;
+}
+
+.green{color:#0a9f3d;}
+.red{color:#d62828;}
+.grey{color:#888;}
+
+button{
+ padding:10px 14px;
+ border:none;
+ border-radius:8px;
+ cursor:pointer;
+ margin:3px;
+}
+
+.active{
+ font-weight:bold;
+}
+
+.stats{
+ display:flex;
+ flex-wrap:wrap;
+ gap:20px;
+}
+
+.stat{
+ flex:1;
+ min-width:150px;
+}
+
+table{
+ width:100%;
+ border-collapse:collapse;
+}
+
+td,th{
+ padding:8px;
+ border-bottom:1px solid #ddd;
+}
+
+canvas{
+ max-height:500px;
+}
+
+#sparkline{
+ font-size:.7rem;
+ white-space:nowrap;
+ overflow:hidden;
+ max-width:180px;
+}
+
+</style>
+</head>
+<body>
+
+<h1>Bangor Water Level</h1>
+
+<div class="card">
+
+<div style="display:flex;justify-content:space-between;align-items:center">
+
+<div>
+
+<div id="currentLevel" class="level">Loading...</div>
+
+<div id="trend"></div>
+
+<div id="rate"></div>
+
+<div id="sparkline"></div>
+
+</div>
+
+<div>
+
+<button onclick="loadData()">🔄 Refresh</button>
+
+</div>
+
+</div>
+
+<p><strong>Latest Observation:</strong> <span id="updated"></span></p>
+
+<p><strong>Data Age:</strong> <span id="dataAge"></span></p>
+
+<p><strong>Dashboard Sync:</strong> <span id="syncTime"></span></p>
+
+<p><strong>Forecast Now:</strong> <span id="forecastValue"></span></p>
+
+</div>
+
+<div class="card">
+
+<label><strong>Datum Offset (m):</strong></label>
+
+<input
+ id="offset"
+ type="number"
+ step="0.001"
+ value="0"
+>
+
+</div>
+
+<div class="card stats">
+
+<div class="stat">
+<strong>24h High</strong><br>
+<span id="high24">--</span>
+</div>
+
+<div class="stat">
+<strong>24h Low</strong><br>
+<span id="low24">--</span>
+</div>
+
+<div class="stat">
+<strong>24h Range</strong><br>
+<span id="range24">--</span>
+</div>
+
+<div class="stat">
+<strong>24h Change</strong><br>
+<span id="change24">--</span>
+</div>
+
+</div>
+
+<div class="card">
+
+<h3>Level Summary</h3>
+
+<table>
+
+<tr>
+<th align="left">Time</th>
+<th align="right">Level</th>
+</tr>
+
+<tr>
+<td>6h ago</td>
+<td align="right" id="level6h">--</td>
+</tr>
+
+<tr>
+<td>3h ago</td>
+<td align="right" id="level3h">--</td>
+</tr>
+
+<tr>
+<td>Latest</td>
+<td align="right" id="levelNow">--</td>
+</tr>
+
+<tr>
+<td><strong>Forecast Now</strong></td>
+<td align="right" id="levelForecast">--</td>
+</tr>
+
+</table>
+
+</div>
+
+<div class="card">
+
+<button onclick="setRange('6h')" id="btn6">6h</button>
+<button onclick="setRange('12h')" id="btn12">12h</button>
+<button onclick="setRange('24h')" id="btn24">24h</button>
+<button onclick="setRange('7d')" id="btn7">7d</button>
+<button onclick="setRange('3m')" id="btn3">3m</button>
+
+<br><br>
+
+<canvas id="chart"></canvas>
+
+</div>
+
+<div class="card">
+
+<h3>EPA Official Graph</h3>
+
+<img
+ src="PASTE_EPA_GRAPH_URL_HERE"
+ style="width:100%;border-radius:8px"
+>
+
+</div>
+
+<script>
+
+let allData=[];
+let chart=null;
+let currentRange='24h';
+
+const offsetInput=document.getElementById('offset');
+
+const savedOffset=localStorage.getItem('datumOffset');
+
+if(savedOffset){
+ offsetInput.value=savedOffset;
+}
+
+offsetInput.addEventListener('input',()=>{
+ localStorage.setItem('datumOffset',offsetInput.value);
+ render();
+});
+
+function getOffset(){
+ return parseFloat(offsetInput.value||0);
+}
+
+function spark(values){
+
+ const chars='▁▂▃▄▅▆▇█';
+
+ const min=Math.min(...values);
+ const max=Math.max(...values);
+
+ return values.map(v=>{
+
+  const idx=Math.round(
+   ((v-min)/(max-min||1))*7
+  );
+
+  return chars[idx];
+
+ }).join('');
+
+}
+
+function setRange(r){
+
+ currentRange=r;
+
+ ['6','12','24','7','3'].forEach(v=>{
+  const b=document.getElementById('btn'+v);
+  if(b) b.classList.remove('active');
+ });
+
+ if(r==='6h') btn6.classList.add('active');
+ if(r==='12h') btn12.classList.add('active');
+ if(r==='24h') btn24.classList.add('active');
+ if(r==='7d') btn7.classList.add('active');
+ if(r==='3m') btn3.classList.add('active');
+
+ render();
+
+}
+
+async function loadData(){
+
+ const response=await fetch(
+  './data/latest.json?v='+Date.now(),
+  {cache:'no-store'}
+ );
+
+ const data=await response.json();
+
+ allData=data.rows;
+
+ render();
+
+}
+
+function render(){
+
+ if(allData.length<2) return;
+
+ const offset=getOffset();
+
+ const latest=allData[allData.length-1];
+ const previous=allData[allData.length-2];
+
+ const latestTime=new Date(latest.timestamp);
+
+ const delta=
+ latest.absolute-previous.absolute;
+
+ const mmPerHr=
+ delta*1000*4;
+
+ const ageHours=
+ (new Date()-latestTime)/3600000;
+
+ const forecast=
+ latest.absolute+
+ (mmPerHr/1000)*ageHours;
+
+ document.getElementById('currentLevel').textContent=
+ (latest.absolute+offset).toFixed(3)+' m';
+
+ const trend=document.getElementById('trend');
+
+ if(mmPerHr>1){
+  trend.innerHTML='<span class="green">▲ Rising</span>';
+ }else if(mmPerHr<-1){
+  trend.innerHTML='<span class="red">▼ Falling</span>';
+ }else{
+  trend.innerHTML='<span class="grey">► Stable</span>';
+ }
+
+ document.getElementById('rate').innerHTML=
+ Math.abs(mmPerHr).toFixed(0)+' mm/hr';
+
+ document.getElementById('updated').textContent=
+ latest.timestamp;
+
+ document.getElementById('dataAge').textContent=
+ ageHours<1
+ ? Math.round(ageHours*60)+' min'
+ : ageHours.toFixed(1)+' hrs';
+
+ document.getElementById('syncTime').textContent=
+ new Date().toLocaleString();
+
+ document.getElementById('forecastValue').textContent=
+ (forecast+offset).toFixed(3)+' m';
+
+ const values24=allData
+ .filter(r=>
+ latestTime-new Date(r.timestamp)<=86400000
+ )
+ .map(r=>r.absolute+offset);
+
+ document.getElementById('sparkline').textContent=
+ spark(values24.slice(-24));
+
+ const high=Math.max(...values24);
+ const low=Math.min(...values24);
+
+ document.getElementById('high24').textContent=high.toFixed(3)+' m';
+ document.getElementById('low24').textContent=low.toFixed(3)+' m';
+ document.getElementById('range24').textContent=(high-low).toFixed(3)+' m';
+ document.getElementById('change24').textContent=(values24.at(-1)-values24[0]).toFixed(3)+' m';
+
+ function nearest(hours){
+
+  const target=
+  latestTime.getTime()-hours*3600000;
+
+  return allData.reduce((best,row)=>{
+
+   const d=Math.abs(new Date(row.timestamp)-target);
+
+   const bd=Math.abs(new Date(best.timestamp)-target);
+
+   return d<bd?row:best;
+
+  });
+
+ }
+
+ const row6=nearest(6);
+ const row3=nearest(3);
+
+ document.getElementById('level6h').textContent=(row6.absolute+offset).toFixed(3)+' m';
+ document.getElementById('level3h').textContent=(row3.absolute+offset).toFixed(3)+' m';
+ document.getElementById('levelNow').textContent=(latest.absolute+offset).toFixed(3)+' m';
+ document.getElementById('levelForecast').textContent=(forecast+offset).toFixed(3)+' m';
+
+ let hours=999999;
+
+ if(currentRange==='6h') hours=6;
+ if(currentRange==='12h') hours=12;
+ if(currentRange==='24h') hours=24;
+ if(currentRange==='7d') hours=168;
+
+ let filtered=allData;
+
+ if(currentRange!=='3m'){
+  filtered=allData.filter(r=>
+   latestTime-new Date(r.timestamp)<=hours*3600000
+  );
+ }
+
+ const labels=filtered.map(r=>r.timestamp);
+ const values=filtered.map(r=>r.absolute+offset);
+
+ labels.push('Now');
+
+ const forecastData=[
+  ...Array(values.length-1).fill(null),
+  values[values.length-1],
+  forecast+offset
+ ];
+
+ if(chart) chart.destroy();
+
+ chart=new Chart(
+ document.getElementById('chart'),
+ {
+  type:'line',
+  data:{
+   labels,
+   datasets:[
+   {
+    label:'Observed',
+    data:[...values,null],
+    tension:0.2
+   },
+   {
+    label:'Forecast',
+    data:forecastData,
+    borderDash:[6,6],
+    tension:0.2
+   }
+   ]
+  }
+ });
+
+}
+
+loadData();
+
+setRange('24h');
+
+setInterval(loadData,900000);
+
+</script>
+
+</body>
+</html>
